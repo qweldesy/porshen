@@ -1,184 +1,407 @@
-/* Поршень — автосервис. Ванильный JS + Motion (motion.dev, vanilla-режим). */
+/* Поршень — автосервис в Тольятти.
+   Анимации — Motion (vanilla). Без JS страница остаётся полностью видимой. */
+
 (function () {
-  'use strict';
+  "use strict";
 
-  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   var M = window.Motion;
-  var canAnimate = !!M && !!M.animate && !reduce;
+  var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var canAnimate = Boolean(M) && !reduceMotion;
+  var body = document.body;
+  var EASE = [0.22, 1, 0.36, 1];
 
-  var header = document.getElementById('siteHeader');
-  var burger = document.getElementById('burger');
-  var panel = document.getElementById('mobilePanel');
+  /* ---------- Шапка ---------- */
 
-  function trapFocus(e, root) {
-    var items = Array.prototype.slice.call(
-      root.querySelectorAll('a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])')
-    ).filter(function (el) { return el.offsetParent !== null; });
-    if (!items.length) return;
-    var first = items[0];
-    var last = items[items.length - 1];
-    if (e.shiftKey && document.activeElement === first) {
-      e.preventDefault();
-      last.focus();
-    } else if (!e.shiftKey && document.activeElement === last) {
-      e.preventDefault();
-      first.focus();
+  var header = document.getElementById("header");
+
+  function updateHeader() {
+    if (!header) return;
+    header.classList.toggle("is-stuck", window.scrollY > 18);
+  }
+
+  updateHeader();
+  window.addEventListener("scroll", updateHeader, { passive: true });
+
+  /* ---------- Появление блоков ---------- */
+
+  var revealItems = Array.prototype.slice.call(
+    document.querySelectorAll("[data-reveal]")
+  );
+
+  if (canAnimate) {
+    try {
+      revealItems.forEach(function (el) {
+        el.style.opacity = "0";
+      });
+
+      revealItems.forEach(function (el) {
+      var parent = el.parentElement;
+      var siblings = parent
+        ? Array.prototype.slice
+            .call(parent.children)
+            .filter(function (node) {
+              return node.hasAttribute("data-reveal");
+            })
+        : [];
+      var index = Math.max(0, siblings.indexOf(el));
+      var delay = Math.min(index * 0.055, 0.26);
+
+      M.inView(
+        el,
+        function () {
+          M.animate(
+            el,
+            { opacity: [0, 1], y: [22, 0] },
+            { duration: 0.7, delay: delay, ease: EASE }
+          );
+        },
+        { amount: 0.14, margin: "0px 0px -6% 0px" }
+      );
+    });
+
+    // Страховка: если наблюдатель не сработал, первый экран не должен остаться пустым.
+    window.setTimeout(function () {
+      revealItems.forEach(function (el) {
+        var rect = el.getBoundingClientRect();
+        if (rect.top < window.innerHeight && getComputedStyle(el).opacity === "0") {
+          el.style.opacity = "1";
+          el.style.transform = "none";
+        }
+      });
+    }, 3200);
+    } catch (error) {
+      revealItems.forEach(function (el) {
+        el.style.opacity = "";
+        el.style.transform = "";
+      });
     }
   }
 
-  /* ---------- Шапка при скролле ---------- */
-  function onScroll() {
-    header.classList.toggle('is-scrolled', window.scrollY > 24);
+  /* ---------- Бегущая строка ---------- */
+
+  var tickerTrack = document.getElementById("tickerTrack");
+  var tickerAnimation = null;
+  var tickerGroup = null;
+
+  function buildTicker() {
+    if (!tickerTrack || !canAnimate) return;
+    tickerGroup = tickerTrack.querySelector(".ticker__group");
+    if (!tickerGroup) return;
+
+    if (!tickerTrack.dataset.cloned) {
+      var clone = tickerGroup.cloneNode(true);
+      clone.setAttribute("aria-hidden", "true");
+      tickerTrack.appendChild(clone);
+      tickerTrack.dataset.cloned = "1";
+    }
+
+    var width = tickerGroup.getBoundingClientRect().width;
+    if (width < 20) return;
+
+    if (tickerAnimation) {
+      tickerAnimation.stop();
+    }
+
+    tickerAnimation = M.animate(
+      tickerTrack,
+      { x: [0, -width] },
+      {
+        duration: Math.max(24, width / 34),
+        ease: "linear",
+        repeat: Infinity
+      }
+    );
   }
-  window.addEventListener('scroll', onScroll, { passive: true });
-  onScroll();
+
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(buildTicker).catch(buildTicker);
+  } else {
+    window.addEventListener("load", buildTicker);
+  }
+
+  var tickerResize;
+  window.addEventListener("resize", function () {
+    if (!canAnimate) return;
+    window.clearTimeout(tickerResize);
+    tickerResize = window.setTimeout(function () {
+      if (tickerAnimation) tickerAnimation.stop();
+      buildTicker();
+    }, 220);
+  });
 
   /* ---------- Мобильное меню ---------- */
-  var lastFocused = null;
+
+  var burger = document.getElementById("burger");
+  var menu = document.getElementById("mobileMenu");
+  var menuOpen = false;
+  var menuCloseTimer = null;
+  var menuLastFocus = null;
+
+  function menuFocusables() {
+    if (!menu) return [];
+    return [
+      burger,
+      menu.querySelector(".mobile-menu__phone")
+    ]
+      .concat(
+        Array.prototype.slice.call(
+          menu.querySelectorAll(".mobile-menu__nav a")
+        )
+      )
+      .filter(Boolean);
+  }
 
   function openMenu() {
-    lastFocused = document.activeElement;
-    burger.setAttribute('aria-expanded', 'true');
-    burger.setAttribute('aria-label', 'Закрыть меню');
-    panel.hidden = false;
-    document.body.style.overflow = 'hidden';
+    if (!menu || !burger || menuOpen) return;
+    menuOpen = true;
+    menuLastFocus = document.activeElement;
+    window.clearTimeout(menuCloseTimer);
+    menu.hidden = false;
+    burger.setAttribute("aria-expanded", "true");
+    burger.setAttribute("aria-label", "Закрыть меню");
+    body.classList.add("is-locked");
 
     if (canAnimate) {
-      M.animate(panel, { opacity: [0, 1] }, { duration: 0.25, easing: [0.22, 1, 0.36, 1] });
-      M.animate(panel.querySelectorAll('.mobile-panel__link, .mobile-panel__foot'), {
-        opacity: [0, 1],
-        transform: ['translateY(18px)', 'translateY(0)']
-      }, { duration: 0.45, delay: M.stagger ? M.stagger(0.05, { start: 0.06 }) : 0, easing: [0.22, 1, 0.36, 1] });
+      menu.style.opacity = "0";
+      M.animate(menu, { opacity: [0, 1] }, { duration: 0.24, ease: "easeOut" });
+
+      Array.prototype.slice
+        .call(menu.querySelectorAll(".mobile-menu__nav a"))
+        .forEach(function (link, i) {
+          link.style.opacity = "0";
+          M.animate(
+            link,
+            { opacity: [0, 1], y: [18, 0] },
+            { duration: 0.42, delay: 0.06 + i * 0.045, ease: EASE }
+          );
+        });
     }
-    var first = panel.querySelector('a');
-    if (first) first.focus({ preventScroll: true });
+
+    window.setTimeout(function () {
+      if (!menuOpen) return;
+      var first = menu.querySelector(".mobile-menu__nav a");
+      if (first) first.focus();
+    }, canAnimate ? 90 : 0);
   }
 
-  function closeMenu() {
-    burger.setAttribute('aria-expanded', 'false');
-    burger.setAttribute('aria-label', 'Открыть меню');
-    panel.hidden = true;
-    document.body.style.overflow = '';
-    if (lastFocused && lastFocused.focus) lastFocused.focus({ preventScroll: true });
+  function closeMenu(restoreFocus) {
+    if (!menu || !burger || !menuOpen) return;
+    menuOpen = false;
+    burger.setAttribute("aria-expanded", "false");
+    burger.setAttribute("aria-label", "Открыть меню");
+    body.classList.remove("is-locked");
+
+    function finish() {
+      menu.hidden = true;
+      menu.style.opacity = "";
+      if (restoreFocus !== false) {
+        if (menuLastFocus && menuLastFocus.focus) {
+          menuLastFocus.focus();
+        } else {
+          burger.focus();
+        }
+      }
+    }
+
+    if (canAnimate) {
+      M.animate(menu, { opacity: [1, 0] }, { duration: 0.16, ease: "easeIn" });
+      menuCloseTimer = window.setTimeout(finish, 175);
+    } else {
+      finish();
+    }
   }
 
-  burger.addEventListener('click', function () {
-    if (burger.getAttribute('aria-expanded') === 'true') closeMenu();
-    else openMenu();
-  });
+  if (burger && menu) {
+    var headerBrand = document.querySelector(".header .brand");
+    if (headerBrand) {
+      headerBrand.addEventListener("click", function () {
+        if (menuOpen) closeMenu(false);
+      });
+    }
 
-  panel.querySelectorAll('a').forEach(function (a) {
-    a.addEventListener('click', closeMenu);
-  });
+    burger.addEventListener("click", function () {
+      if (menuOpen) closeMenu();
+      else openMenu();
+    });
 
-  document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && !panel.hidden) closeMenu();
-    if (e.key === 'Tab' && !panel.hidden) trapFocus(e, panel);
-  });
+    Array.prototype.slice
+      .call(menu.querySelectorAll("a"))
+      .forEach(function (link) {
+        link.addEventListener("click", function () {
+          closeMenu(false);
+        });
+      });
 
-  window.addEventListener('resize', function () {
-    if (window.innerWidth > 980 && !panel.hidden) closeMenu();
-  });
+    document.addEventListener("keydown", function (event) {
+      if (!menuOpen) return;
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeMenu();
+        return;
+      }
+
+      if (event.key !== "Tab") return;
+
+      var focusables = menuFocusables();
+      if (!focusables.length) return;
+      var first = focusables[0];
+      var last = focusables[focusables.length - 1];
+
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    });
+
+    window.addEventListener("resize", function () {
+      if (window.innerWidth > 980 && menuOpen) closeMenu(false);
+    });
+  }
 
   /* ---------- Лайтбокс ---------- */
-  var lightbox = document.getElementById('lightbox');
-  var lightboxImg = document.getElementById('lightboxImg');
-  var lightboxClose = document.getElementById('lightboxClose');
-  var lightboxOpener = null;
 
-  document.querySelectorAll('.photo').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      lightboxOpener = btn;
-      lightboxImg.src = btn.getAttribute('data-src');
-      lightboxImg.alt = btn.querySelector('img') ? btn.querySelector('img').alt : 'Фото сервиса «Поршень»';
-      lightbox.hidden = false;
-      document.body.style.overflow = 'hidden';
-      lightboxClose.focus();
-    });
+  var galleryItems = Array.prototype.slice.call(
+    document.querySelectorAll(".gallery__item")
+  );
+  var lightbox = document.getElementById("lightbox");
+  var lightboxImg = document.getElementById("lightboxImg");
+  var lightboxCaption = document.getElementById("lightboxCaption");
+  var lightboxCounter = document.getElementById("lightboxCounter");
+  var lightboxClose = document.getElementById("lightboxClose");
+  var lightboxPrev = document.getElementById("lightboxPrev");
+  var lightboxNext = document.getElementById("lightboxNext");
+  var lightboxIndex = 0;
+  var lightboxOpen = false;
+  var lightboxLastFocus = null;
+
+  var slides = galleryItems.map(function (button) {
+    var img = button.querySelector("img");
+    var cap = button.querySelector(".gallery__cap");
+    return {
+      src: img ? img.currentSrc || img.src : "",
+      alt: img ? img.alt : "",
+      caption: cap ? cap.textContent : ""
+    };
   });
+
+  function setSlide(index) {
+    if (!slides.length) return;
+    lightboxIndex = (index + slides.length) % slides.length;
+    var slide = slides[lightboxIndex];
+    lightboxImg.src = slide.src;
+    lightboxImg.alt = slide.alt;
+    lightboxCaption.textContent = slide.caption;
+    lightboxCounter.textContent =
+      String(lightboxIndex + 1).padStart(2, "0") +
+      " / " +
+      String(slides.length).padStart(2, "0");
+
+    var next = slides[(lightboxIndex + 1) % slides.length];
+    if (next) {
+      var preload = new Image();
+      preload.src = next.src;
+    }
+  }
+
+  function openLightbox(index, trigger) {
+    if (!lightbox || !slides.length) return;
+    lightboxOpen = true;
+    lightboxLastFocus = trigger || document.activeElement;
+    setSlide(index);
+    lightbox.hidden = false;
+    body.classList.add("is-locked");
+
+    if (canAnimate) {
+      lightbox.style.opacity = "0";
+      M.animate(lightbox, { opacity: [0, 1] }, { duration: 0.22, ease: "easeOut" });
+      M.animate(
+        lightboxImg,
+        { opacity: [0, 1], scale: [0.985, 1] },
+        { duration: 0.28, delay: 0.04, ease: EASE }
+      );
+    }
+
+    window.setTimeout(function () {
+      if (lightboxOpen && lightboxClose) lightboxClose.focus();
+    }, canAnimate ? 40 : 0);
+  }
 
   function closeLightbox() {
-    lightbox.hidden = true;
-    lightboxImg.removeAttribute('src');
-    document.body.style.overflow = '';
-    if (lightboxOpener) lightboxOpener.focus({ preventScroll: true });
+    if (!lightbox || !lightboxOpen) return;
+    lightboxOpen = false;
+    body.classList.remove("is-locked");
+
+    function finish() {
+      lightbox.hidden = true;
+      lightbox.style.opacity = "";
+      lightboxImg.removeAttribute("src");
+      if (lightboxLastFocus && lightboxLastFocus.focus) {
+        lightboxLastFocus.focus();
+      }
+    }
+
+    if (canAnimate) {
+      M.animate(lightbox, { opacity: [1, 0] }, { duration: 0.16, ease: "easeIn" });
+      window.setTimeout(finish, 175);
+    } else {
+      finish();
+    }
   }
 
-  lightboxClose.addEventListener('click', closeLightbox);
-  lightbox.addEventListener('click', function (e) {
-    if (e.target === lightbox) closeLightbox();
-  });
-  document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && !lightbox.hidden) closeLightbox();
-    if (e.key === 'Tab' && !lightbox.hidden) trapFocus(e, lightbox);
-  });
-
-  /* ---------- Motion ---------- */
-  if (!canAnimate) {
-    document.documentElement.classList.add('no-motion');
-    return;
-  }
-
-  var ease = [0.22, 1, 0.36, 1];
-
-  /* Интро героя */
-  var heroParts = [
-    '.hero__kicker',
-    '.hero__title-top',
-    '.hero__title-main',
-    '.hero__side',
-    '.info-bar'
-  ].map(function (s) { return document.querySelector(s); }).filter(Boolean);
-
-  M.animate(heroParts, {
-    opacity: [0, 1],
-    transform: ['translateY(30px)', 'translateY(0)']
-  }, {
-    duration: 0.9,
-    delay: M.stagger ? M.stagger(0.08, { start: 0.1 }) : 0,
-    easing: ease
-  });
-
-  /* Появление секций */
-  var revealSelector = [
-    '.section__label',
-    '.section__title',
-    '.section__lead',
-    '.service-card',
-    '.brands',
-    '.photo',
-    '.photos__foot',
-    '.score',
-    '.aspects',
-    '.review',
-    '.reviews__all',
-    '.feature',
-    '.cta__label',
-    '.cta__title',
-    '.cta__lead',
-    '.cta__phone',
-    '.cta__actions',
-    '.cta__badge',
-    '.facts'
-  ].join(',');
-
-  var items = Array.prototype.slice.call(document.querySelectorAll(revealSelector));
-  items.forEach(function (el) { el.classList.add('reveal'); });
-
-  items.forEach(function (el) {
-    M.inView(el, function () {
-      var siblings = el.parentElement
-        ? Array.prototype.slice.call(el.parentElement.querySelectorAll(':scope > .reveal'))
-        : [];
-      var index = siblings.indexOf(el);
-      M.animate(el, {
-        opacity: [0, 1],
-        transform: ['translateY(26px)', 'translateY(0)']
-      }, {
-        duration: 0.65,
-        delay: Math.min(Math.max(index, 0) * 0.06, 0.3),
-        easing: ease
+  if (lightbox && lightboxImg) {
+    galleryItems.forEach(function (button, index) {
+      button.addEventListener("click", function () {
+        openLightbox(index, button);
       });
-    }, { amount: 0.15 });
-  });
+    });
+
+    lightboxClose.addEventListener("click", closeLightbox);
+    lightboxPrev.addEventListener("click", function () {
+      setSlide(lightboxIndex - 1);
+    });
+    lightboxNext.addEventListener("click", function () {
+      setSlide(lightboxIndex + 1);
+    });
+
+    lightbox.addEventListener("click", function (event) {
+      if (event.target === lightbox) closeLightbox();
+    });
+
+    document.addEventListener("keydown", function (event) {
+      if (!lightboxOpen) return;
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeLightbox();
+        return;
+      }
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        setSlide(lightboxIndex - 1);
+        return;
+      }
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        setSlide(lightboxIndex + 1);
+        return;
+      }
+      if (event.key === "Tab") {
+        var focusables = [lightboxClose, lightboxPrev, lightboxNext];
+        var first = focusables[0];
+        var last = focusables[focusables.length - 1];
+
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    });
+  }
 })();
