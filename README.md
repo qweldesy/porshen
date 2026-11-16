@@ -22,7 +22,8 @@
 ```
 index.html
 css/style.css
-js/main.js          — меню, лайтбокс, Motion (motion.dev)
+js/main.js          — меню, лайтбокс, анимации появления
+js/motion.js        — Motion 12.23.0 (MIT), локальная копия motion.dev
 fonts/              — Tektur + Inter (woff2, кириллица + латиница)
 img/                — hero, 4 фото альбома, og, favicon
 ```

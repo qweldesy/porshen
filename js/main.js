@@ -99,7 +99,7 @@
 
   function closeLightbox() {
     lightbox.hidden = true;
-    lightboxImg.src = '';
+    lightboxImg.removeAttribute('src');
     document.body.style.overflow = '';
     if (lightboxOpener) lightboxOpener.focus({ preventScroll: true });
   }
